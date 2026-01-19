@@ -5,7 +5,7 @@ This guide will walk you through deploying your Express.js backend to Render ste
 ## Prerequisites
 
 - GitHub account with the code pushed to repository
-- Render account (sign up at https://render.com - free tier available)
+- Render account (sign up at https://render.com - free tier available)  
 - Database connection string (PostgreSQL)
 
 ## Step 1: Sign Up / Sign In to Render
