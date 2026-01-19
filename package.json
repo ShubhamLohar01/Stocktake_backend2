@@ -17,7 +17,8 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "cd ../frontend && vite build",
     "build:server": "vite build --config vite.config.server.ts",
-    "start": "node ../dist/server/node-build.mjs",
+    "start": "tsx node-build.ts",
+    "start:prod": "node ../dist/server/node-build.mjs",
     "test": "vitest --run",
     "format.fix": "prettier --write .",
     "typecheck": "cd ../frontend && tsc",
@@ -39,6 +40,7 @@
     "multer": "^2.0.2",
     "nodemon": "^3.1.11",
     "serverless-http": "^3.2.0",
+    "tsx": "^4.20.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -110,7 +112,6 @@
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.176.0",
-    "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "vaul": "^1.1.2",
     "vite": "^7.1.2",
