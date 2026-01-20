@@ -655,14 +655,15 @@ export const getGroupedStocktakeEntries: RequestHandler = async (req, res) => {
 const checkAuditSessionLock = async (warehouse: string, floorName?: string): Promise<boolean> => {
   try {
     // Check if there's an active audit session for this warehouse
-    // An active audit session (IN_PROGRESS, SUBMITTED, APPROVED) should lock entries for floor managers
+    // Lock floor-manager edits ONLY while audit is IN_PROGRESS.
+    // Once manager "saves" (resultsheet saved), we mark audit as SUBMITTED and unlock editing.
     const warehouseUpper = warehouse.toUpperCase();
     const query = Prisma.sql`
       SELECT a.status 
       FROM audit_sessions a
       JOIN warehouses w ON w.id = a.warehouse_id
       WHERE UPPER(w.name) = UPPER(${warehouseUpper})
-        AND a.status IN ('IN_PROGRESS', 'SUBMITTED', 'APPROVED')
+        AND a.status IN ('IN_PROGRESS')
       ORDER BY a.created_at DESC
       LIMIT 1
     `;
@@ -1139,6 +1140,29 @@ export const saveStocktakeResultsheet: RequestHandler<
 
     await Promise.all(resultsheetInsertPromises);
     console.log(`✓ Inserted ${Object.keys(aggregatedForResultsheet).length} aggregated entries into stocktake_resultsheet`);
+
+    // === END AUDIT on manager save ===
+    // When manager saves resultsheet, mark latest IN_PROGRESS audit for this warehouse as SUBMITTED
+    // so floor managers can resume editing.
+    try {
+      const warehouseToEnd = processedEntries[0]?.warehouse;
+      if (warehouseToEnd) {
+        const updateAuditQuery = Prisma.sql`
+          UPDATE audit_sessions a
+          SET status = 'SUBMITTED', updated_at = CURRENT_TIMESTAMP
+          FROM warehouses w
+          WHERE w.id = a.warehouse_id
+            AND UPPER(w.name) = UPPER(${warehouseToEnd})
+            AND a.status = 'IN_PROGRESS'
+          RETURNING a.id
+        `;
+        const updatedAudits: any[] = await prisma.$queryRaw(updateAuditQuery) as any[];
+        console.log(`✓ Audit ended for warehouse ${warehouseToEnd}. Updated audits: ${updatedAudits.length}`);
+      }
+    } catch (auditUpdateError) {
+      // Fail open: saving resultsheet succeeded, so don't fail the request if audit status update fails.
+      console.error("Failed to update audit status after save:", auditUpdateError);
+    }
 
     console.log("\n=== SAVE COMPLETE ===");
     console.log(`Total entries saved: ${insertedEntries.length} to stocktake_entries`);

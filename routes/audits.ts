@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 export const startAudit: RequestHandler<
   {},
   any,
-  { warehouseId: string; auditDate: string; auditTime?: string }
+  { warehouseId?: string; warehouseName?: string; auditDate: string; auditTime?: string }
 > = async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
@@ -18,13 +18,34 @@ export const startAudit: RequestHandler<
         .json({ error: "Only managers can start audits" });
     }
 
-    const { warehouseId, auditDate, auditTime } = req.body;
+    const { warehouseId, warehouseName, auditDate, auditTime } = req.body;
+
+    // Resolve warehouse ID from name if needed
+    let resolvedWarehouseId = warehouseId;
+    if (!resolvedWarehouseId && warehouseName) {
+      const warehouse = await prisma.warehouse.findFirst({
+        where: {
+          name: {
+            equals: warehouseName,
+            mode: "insensitive",
+          },
+        },
+      });
+      if (!warehouse) {
+        return res.status(404).json({ error: `Warehouse "${warehouseName}" not found` });
+      }
+      resolvedWarehouseId = warehouse.id;
+    }
+
+    if (!resolvedWarehouseId) {
+      return res.status(400).json({ error: "warehouseId or warehouseName is required" });
+    }
 
     // Check if audit already exists for this warehouse and date
     const existingAudit = await prisma.auditSession.findUnique({
       where: {
         warehouseId_auditDate: {
-          warehouseId,
+          warehouseId: resolvedWarehouseId,
           auditDate: new Date(auditDate),
         },
       },
@@ -38,7 +59,7 @@ export const startAudit: RequestHandler<
 
     const auditSession = await prisma.auditSession.create({
       data: {
-        warehouseId,
+        warehouseId: resolvedWarehouseId,
         userId: req.user.userId,
         auditDate: new Date(auditDate),
         auditTime: auditTime ? new Date(auditTime) : null,

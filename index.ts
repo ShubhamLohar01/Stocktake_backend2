@@ -16,6 +16,7 @@ if (!process.env.DATABASE_URL && process.env.DB_HOST) {
 import express from "express";
 import cors from "cors";
 import { authMiddleware, requireRole } from "./middleware/auth.js";
+import { blockFloorManagerWritesDuringAudit } from "./middleware/auditLock.js";
 import { login, register, me } from "./routes/auth.js";
 import {
   getUserWarehouses,
@@ -143,14 +144,44 @@ export function createServer() {
   );
 
   // ============ Pallet Routes ============
-  app.post("/api/sessions/:sessionId/pallets", authMiddleware, createPallet);
-  app.patch("/api/pallets/:palletId", authMiddleware, updatePallet);
-  app.delete("/api/pallets/:palletId", authMiddleware, deletePallet);
+  app.post(
+    "/api/sessions/:sessionId/pallets",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    createPallet
+  );
+  app.patch(
+    "/api/pallets/:palletId",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    updatePallet
+  );
+  app.delete(
+    "/api/pallets/:palletId",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    deletePallet
+  );
 
   // ============ Stock Line Routes ============
-  app.post("/api/pallets/:palletId/stock", authMiddleware, addStockLine);
-  app.patch("/api/stock/:stockLineId", authMiddleware, updateStockLine);
-  app.delete("/api/stock/:stockLineId", authMiddleware, deleteStockLine);
+  app.post(
+    "/api/pallets/:palletId/stock",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    addStockLine
+  );
+  app.patch(
+    "/api/stock/:stockLineId",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    updateStockLine
+  );
+  app.delete(
+    "/api/stock/:stockLineId",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    deleteStockLine
+  );
 
   // ============ Item & Category Routes ============
   app.get("/api/categories", authMiddleware, getCategories);
@@ -183,15 +214,35 @@ export function createServer() {
   );
 
   // ============ StockTake Entries Routes ============
-  app.post("/api/stocktake-entries/submit", authMiddleware, submitStocktakeEntries);
+  app.post(
+    "/api/stocktake-entries/submit",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    submitStocktakeEntries
+  );
   app.get("/api/stocktake-entries", authMiddleware, getStocktakeEntries);
   app.get("/api/stocktake-entries/grouped", authMiddleware, getGroupedStocktakeEntries);
   app.get("/api/stocktake-entries/audit-status", authMiddleware, getAuditSessionStatus);
-  app.post("/api/stocktake-entries/save-resultsheet", authMiddleware, saveStocktakeResultsheet);
+  app.post(
+    "/api/stocktake-entries/save-resultsheet",
+    authMiddleware,
+    requireRole("INVENTORY_MANAGER", "ADMIN"),
+    saveStocktakeResultsheet
+  );
   app.delete("/api/stocktake-entries/clear-all", authMiddleware, requireRole("INVENTORY_MANAGER", "ADMIN"), clearAllEntries);
   // Note: Specific routes (like clear-all) must come before parameterized routes (like :entryId)
-  app.put("/api/stocktake-entries/:entryId", authMiddleware, updateStocktakeEntry);
-  app.delete("/api/stocktake-entries/:entryId", authMiddleware, deleteStocktakeEntry);
+  app.put(
+    "/api/stocktake-entries/:entryId",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    updateStocktakeEntry
+  );
+  app.delete(
+    "/api/stocktake-entries/:entryId",
+    authMiddleware,
+    blockFloorManagerWritesDuringAudit,
+    deleteStocktakeEntry
+  );
   
   // ============ Stocktake Resultsheet Routes ============
   app.get("/api/stocktake-resultsheet/list", authMiddleware, getResultsheetList);
