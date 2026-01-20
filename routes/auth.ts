@@ -36,6 +36,12 @@ export const login: RequestHandler<{}, any, LoginRequest> = async (
   req,
   res
 ) => {
+  console.log("Login request received:", { 
+    body: req.body, 
+    hasUsername: !!req.body?.username,
+    hasPassword: !!req.body?.password 
+  });
+  
   try {
     const { username, password } = req.body;
 
@@ -46,16 +52,48 @@ export const login: RequestHandler<{}, any, LoginRequest> = async (
     }
 
     // Find user in stocktake_users table
-    const query = Prisma.sql`
-      SELECT id, username, password, warehouse, role, name, email, is_active
-      FROM stocktake_users
-      WHERE username = ${username}
-      LIMIT 1
-    `;
-    
-    const users: any[] = await prisma.$queryRaw(query) as any[];
+    let users: any[] = [];
+    try {
+      const query = Prisma.sql`
+        SELECT id, username, password, warehouse, role, name, email, is_active
+        FROM stocktake_users
+        WHERE username = ${username}
+        LIMIT 1
+      `;
+      
+      console.log("Executing database query for username:", username);
+      users = await prisma.$queryRaw(query) as any[];
+      console.log("Database query result:", {
+        userCount: users.length,
+        foundUser: users.length > 0 ? {
+          id: users[0]?.id,
+          username: users[0]?.username,
+          hasPassword: !!users[0]?.password,
+          is_active: users[0]?.is_active,
+          role: users[0]?.role
+        } : null
+      });
+    } catch (dbError: any) {
+      console.error("Database query error:", dbError);
+      // Check if table doesn't exist
+      if (dbError.message?.includes("does not exist") || dbError.message?.includes("relation")) {
+        return res.status(500).json({ 
+          error: "Database table not found",
+          message: "The stocktake_users table does not exist. Please run database migrations."
+        });
+      }
+      // Check if connection error
+      if (dbError.message?.includes("connect") || dbError.message?.includes("timeout")) {
+        return res.status(500).json({ 
+          error: "Database connection failed",
+          message: "Unable to connect to the database. Please check your DATABASE_URL."
+        });
+      }
+      throw dbError; // Re-throw if it's a different error
+    }
 
     if (users.length === 0) {
+      console.log("User not found in database for username:", username);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -63,11 +101,19 @@ export const login: RequestHandler<{}, any, LoginRequest> = async (
 
     // Check if user is active
     if (!dbUser.is_active) {
+      console.log("User account is disabled:", username);
       return res.status(403).json({ error: "Account is disabled" });
     }
 
     // Check password (plain text comparison for now - should be hashed in production)
+    console.log("Comparing passwords:", {
+      providedPassword: password,
+      dbPassword: dbUser.password,
+      match: dbUser.password === password
+    });
+    
     if (dbUser.password !== password) {
+      console.log("Password mismatch for user:", username);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -92,9 +138,16 @@ export const login: RequestHandler<{}, any, LoginRequest> = async (
         dbRole: dbUser.role, // Keep original role from DB
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Login error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    // Ensure we always send JSON response
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: "Internal server error",
+        message: error?.message || "An unexpected error occurred",
+        details: process.env.NODE_ENV === "development" ? error?.stack : undefined
+      });
+    }
   }
 };
 
