@@ -68,6 +68,17 @@ import { getManagerUsers } from "./routes/users.js";
 export function createServer() {
   const app = express();
 
+  // Request logging middleware (development only)
+  if (process.env.NODE_ENV === "development") {
+    app.use((req, res, next) => {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+      if (req.body && Object.keys(req.body).length > 0) {
+        console.log("Request body:", JSON.stringify(req.body).substring(0, 200));
+      }
+      next();
+    });
+  }
+
   // Middleware
   app.use(cors());
   app.use(express.json());
@@ -203,6 +214,27 @@ export function createServer() {
     requireRole("ADMIN"),
     getExports
   );
+
+  // 404 handler for unmatched API routes (must be after all route definitions)
+  // This will only run if no route matched above
+  app.use((req, res) => {
+    if (req.path.startsWith("/api/")) {
+      res.status(404).json({ error: "API endpoint not found", path: req.path });
+    } else {
+      res.status(404).json({ error: "Not found" });
+    }
+  });
+
+  // Global error handler - must be last
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("Unhandled error:", err);
+    if (!res.headersSent) {
+      res.status(err.status || 500).json({
+        error: err.message || "Internal server error",
+        ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
+      });
+    }
+  });
 
   return app;
 }
