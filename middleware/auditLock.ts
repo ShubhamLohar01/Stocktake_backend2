@@ -64,17 +64,17 @@ export async function blockFloorManagerWritesDuringAudit(
       if (req.params?.sessionId) {
         const session = await prisma.floorSession.findUnique({
           where: { id: req.params.sessionId },
-          select: { auditSession: { select: { warehouseId: true } } },
+          select: { audit: { select: { warehouseId: true } } },
         });
-        if (session?.auditSession?.warehouseId) {
-          warehouseId = session.auditSession.warehouseId;
+        if (session?.audit?.warehouseId) {
+          warehouseId = session.audit.warehouseId;
         }
       }
 
       // For routes like /api/stocktake-entries/:entryId, get warehouse from entry
       if (!warehouseId && req.params?.entryId) {
         try {
-          const entry = await prisma.stocktakeEntry.findUnique({
+          const entry = await prisma.stockTakeEntry.findUnique({
             where: { id: parseInt(req.params.entryId) },
             select: { warehouse: true },
           });

@@ -1,6 +1,6 @@
-# AWS Lambda Deployment Steps - StockTake Backend
+# AWS Lambda + API Gateway Complete Setup Guide - StockTake Backend
 
-This guide provides step-by-step instructions to deploy your `backend-lambda.zip` package to AWS Lambda.
+This comprehensive guide walks you through deploying your StockTake backend to AWS Lambda and exposing it via API Gateway.
 
 ## Quick Reference
 
@@ -9,18 +9,22 @@ This guide provides step-by-step instructions to deploy your `backend-lambda.zip
 **Runtime:** Node.js 20.x (or 18.x)  
 **Architecture:** x86_64  
 **Timeout:** 30 seconds (recommended)  
-**Memory:** 512-1024 MB (recommended)
+**Memory:** 512-1024 MB (recommended)  
+**Database:** RDS PostgreSQL (Public Endpoint - No VPC needed)  
+**RDS Endpoint:** `wms-postgres-db.cpis084golp7.ap-south-1.rds.amazonaws.com`
 
 **Required Environment Variables:**
-- `DATABASE_URL` (or individual DB variables: `DB_HOST`, `DB_USER`, `DB_PASSWORD`, etc.)
-- `JWT_SECRET`
-- `NODE_ENV=production`
+- `DATABASE_URL` = `postgresql://username:password@wms-postgres-db.cpis084golp7.ap-south-1.rds.amazonaws.com:5432/stocktake?schema=public`
+- `JWT_SECRET` = Your secret key for JWT signing
+- `NODE_ENV` = `production`
 
 ## Prerequisites
 
-- AWS Account with appropriate permissions
+- AWS Account with appropriate permissions (Lambda, API Gateway, and RDS access)
 - AWS CLI installed and configured (optional, for CLI deployment)
 - The `backend-lambda.zip` file created by the packaging script
+- RDS PostgreSQL database credentials (your public endpoint: `wms-postgres-db.cpis084golp7.ap-south-1.rds.amazonaws.com`)
+- Database security group configured to allow inbound connections on port 5432 from anywhere (0.0.0.0/0) or specific Lambda IP ranges
 
 ## Step 1: Verify Your Package
 
@@ -65,8 +69,10 @@ The `tsconfig.lambda.json` is configured to output ES modules (`"module": "ES202
    - **Function name:** `stocktake-backend` (or your preferred name)
    - **Runtime:** `Node.js 20.x` (or `Node.js 18.x`)
    - **Architecture:** `x86_64`
-   - **Execution role:** Choose "Create a new role with basic Lambda permissions" (we'll update permissions later)
+   - **Execution role:** Choose "Create a new role with basic Lambda permissions"
 4. Click **"Create function"**
+
+**Important Note:** Since your RDS database (`wms-postgres-db.cpis084golp7.ap-south-1.rds.amazonaws.com`) has a **public endpoint**, you do **NOT need to configure VPC** for this Lambda function. This simplifies setup and eliminates VPC-related cold start delays.
 
 ## Step 3: Upload Your Deployment Package
 
@@ -141,19 +147,22 @@ If you prefer not to use `DATABASE_URL`, you can set individual variables:
    - **Memory:** Set to **512 MB** (minimum) or **1024 MB** (recommended for better performance)
 4. Click **"Save"**
 
-### 6.2 VPC Configuration (If Database is in VPC)
+### 6.2 No VPC Configuration Needed
 
-If your database is in a VPC:
+Since your RDS database has a **public endpoint** (`wms-postgres-db.cpis084golp7.ap-south-1.rds.amazonaws.com`), you do NOT need to configure VPC settings for this Lambda function.
 
-1. Go to **"Configuration"** → **"VPC"**
-2. Click **"Edit"**
-3. Select:
-   - **VPC:** Your database VPC
-   - **Subnets:** Select at least 2 subnets in different availability zones
-   - **Security groups:** 0
-4. Click **"Save"**
+**Benefits of no VPC:**
+- ✅ Faster cold starts (no ENI creation delay)
+- ✅ Simpler configuration
+- ✅ No NAT Gateway costs
+- ✅ Easier troubleshooting
 
-**Note:** VPC configuration adds cold start latency. Consider using RDS Proxy or database outside VPC if possible.
+**Database Security Group Configuration:**
+Ensure your RDS security group allows inbound traffic on port 5432 from:
+- **Source:** `0.0.0.0/0` (for public access) OR
+- **Source:** Specific Lambda IP ranges for your region (for better security)
+
+To allow Lambda access, you can also use the security group ID of your Lambda function's execution role, but since Lambda is not in a VPC, the simplest approach is to allow public access with strong authentication (username/password).
 
 ## Step 7: Test Your Lambda Function (Before API Gateway)
 
@@ -263,57 +272,100 @@ Once your Lambda function tests successfully, proceed to set up API Gateway.
 
 1. Go to **API Gateway** service in AWS Console
 2. Click **"Create API"**
-3. Choose **"REST API"** → **"Build"**
+3. Choose **"REST API"** (not Private or HTTP API) → **"Build"**
 4. Configure:
    - **Protocol:** REST
    - **Create new API:** New API
    - **API name:** `stocktake-api`
-   - **Endpoint Type:** Regional (or Edge if you need global distribution)
+   - **Description:** `StockTake Backend API`
+   - **Endpoint Type:** Regional (recommended) or Edge (for global distribution)
 5. Click **"Create API"**
 
-### 8.2 Create Resource and Method
+### 8.2 Create Root Proxy Resource
 
-1. In API Gateway, select your API
+This allows your Lambda to handle all API routes (`/api/*`):
+
+1. In your API Gateway console, select your API (`stocktake-api`)
 2. Click **"Actions"** → **"Create Resource"**
 3. Configure:
-   - **Resource Name:** `api`
-   - **Resource Path:** `{proxy}` (check "Enable API Gateway Proxy Integration")
+   - **Configure as proxy resource:** ✅ Check this box
+   - **Resource Name:** Will auto-fill as `proxy`
+   - **Resource Path:** Will auto-fill as `{proxy+}`
+   - **Enable API Gateway CORS:** ✅ Check this box (if your frontend is on a different domain)
 4. Click **"Create Resource"**
-5. With the new resource selected, click **"Actions"** → **"Create Method"**
-6. Select **"ANY"** from dropdown
-7. Configure:
-   - **Integration type:** Lambda Function
-   - **Lambda Function:** `stocktake-backend`
-   - **Use Lambda Proxy integration:** Check this box
-8. Click **"Save"** and confirm the permission prompt
 
-### 8.3 Deploy API
+### 8.3 Configure ANY Method
+
+1. With the `{proxy+}` resource selected, click **"Actions"** → **"Create Method"**
+2. Select **"ANY"** from the dropdown and click the checkmark ✅
+3. Configure the integration:
+   - **Integration type:** Lambda Function
+   - **Use Lambda Proxy integration:** ✅ Check this box (IMPORTANT!)
+   - **Lambda Region:** Select your region (e.g., `ap-south-1`)
+   - **Lambda Function:** Type `stocktake-backend` (it should autocomplete)
+4. Click **"Save"**
+5. A popup will appear asking for permission: **"Add Permission to Lambda Function"**
+   - Click **"OK"** to allow API Gateway to invoke your Lambda
+
+### 8.4 Create Root Method (Optional but Recommended)
+
+To handle requests to the root path (`/`):
+
+1. Click on the root resource (`/`) in the resource tree
+2. Click **"Actions"** → **"Create Method"**
+3. Select **"ANY"** from dropdown and click checkmark ✅
+4. Configure the same way as above:
+   - **Integration type:** Lambda Function
+   - **Use Lambda Proxy integration:** ✅ Check this box
+   - **Lambda Function:** `stocktake-backend`
+5. Click **"Save"** and **"OK"** on the permission popup
+
+### 8.5 Deploy API
 
 1. Click **"Actions"** → **"Deploy API"**
 2. Configure:
    - **Deployment stage:** `[New Stage]`
-   - **Stage name:** `prod` (or `dev`)
+   - **Stage name:** `prod` (or `dev` for development)
    - **Stage description:** `Production deployment`
+   - **Deployment description:** `Initial deployment`
 3. Click **"Deploy"**
-4. Copy the **"Invoke URL"** (e.g., `https://abc123.execute-api.us-east-1.amazonaws.com/prod`)
 
-### 8.4 Update Frontend API URL
+### 8.6 Get Your API Endpoint URL
 
-Update your frontend to use the API Gateway URL instead of localhost.
+1. After deployment, you'll be taken to the **Stages** section
+2. Click on your stage (e.g., `prod`)
+3. At the top, you'll see **"Invoke URL"** - this is your API endpoint
+   - Example: `https://abc123xyz.execute-api.ap-south-1.amazonaws.com/prod`
+4. **Copy this URL** - you'll use it in your frontend
 
-## Step 9: Test Your Lambda Function via API Gateway
+### 8.7 Test Your API
 
-### 9.1 Test via API Gateway
+Test your deployed API using the invoke URL:
 
-1. Go to your API Gateway
-2. Click on your resource
-3. Click **"ANY"** method
-4. Click **"TEST"** button
-5. Set:
-   - **Path:** `/api/ping`
-   - **Method:** GET
-6. Click **"Test"**
-7. Check the response
+**Test the ping endpoint:**
+```
+https://your-api-id.execute-api.ap-south-1.amazonaws.com/prod/api/ping
+```
+
+You should get: `{"message":"pong"}`
+
+**Test login endpoint:**
+```bash
+curl -X POST https://your-api-id.execute-api.ap-south-1.amazonaws.com/prod/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"your-username","password":"your-password"}'
+```
+
+## Step 9: Update Frontend API URL
+
+Update your frontend to use the API Gateway URL instead of localhost:
+
+1. Open your frontend configuration file (e.g., `.env` or API config file)
+2. Update the API URL to your API Gateway endpoint:
+   ```
+   VITE_API_URL=https://your-api-id.execute-api.ap-south-1.amazonaws.com/prod
+   ```
+3. Rebuild and redeploy your frontend
 
 ## Step 10: Monitor and Troubleshoot
 
@@ -334,9 +386,10 @@ Update your frontend to use the API Gateway URL instead of localhost.
 - Check that `dist/lambda.js` exists in your zip
 
 **Issue: "Database connection timeout"**
-- Solution: Check VPC configuration if database is in VPC
-- Verify security groups allow Lambda to connect to database
-- Check database credentials in environment variables
+- Solution: Verify database credentials in environment variables
+- Check that RDS security group allows inbound traffic on port 5432 from 0.0.0.0/0
+- Ensure `DATABASE_URL` is correctly formatted
+- Test database connection from another public source to verify it's accessible
 
 **Issue: "Module initialization error"**
 - Solution: Check CloudWatch logs for specific error
@@ -350,6 +403,8 @@ If your frontend is on a different domain:
 1. In API Gateway, go to **"Actions"** → **"Enable CORS"**
 2. Configure allowed origins, methods, and headers
 3. Click **"Enable CORS"** and **"Deploy API"**
+
+Or handle CORS in your Lambda code (which you already do with `cors()` middleware).
 
 Or handle CORS in your Lambda code (which you already do with `cors()` middleware).
 

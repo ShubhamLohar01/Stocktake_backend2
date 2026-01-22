@@ -54,13 +54,13 @@ export const login: RequestHandler<{}, any, LoginRequest> = async (
     // Find user in stocktake_users table
     let users: any[] = [];
     try {
-      const query = Prisma.sql`
-        SELECT id, username, password, warehouse, role, name, email, is_active
-        FROM stocktake_users
-        WHERE username = ${username}
-        LIMIT 1
-      `;
-      
+    const query = Prisma.sql`
+      SELECT id, username, password, warehouse, role, name, email, is_active
+      FROM stocktake_users
+      WHERE username = ${username}
+      LIMIT 1
+    `;
+    
       console.log("Executing database query for username:", username);
       users = await prisma.$queryRaw(query) as any[];
       console.log("Database query result:", {
