@@ -96,15 +96,18 @@ aws lambda update-function-code \
   --zip-file fileb://backend-lambda.zip
 ```
 
-## Step 4: Configure Lambda Handler
+## Step 4: Configure Lambda Handler **(Critical)**
 
 1. In your Lambda function page, go to **"Code"** tab
 2. Scroll to **"Runtime settings"** section
 3. Click **"Edit"** button
-4. Set the handler to: **`dist/lambda.handler`**
+4. Set the handler to exactly: **`dist/lambda.handler`**
 5. Click **"Save"**
 
-**Note:** This tells Lambda to look for the `handler` export in `dist/lambda.js` (compiled from `lambda.ts`)
+**Important:** The `backend-lambda.zip` from `package-lambda.ps1` puts the entry point at **`dist/lambda.js`**. You must use **`dist/lambda.handler`**, not `lambda.handler`. If you use `lambda.handler`, you will get:
+```text
+Runtime.ImportModuleError: Error: Cannot find module 'lambda'
+```
 
 ## Step 5: Configure Environment Variables
 
@@ -127,8 +130,8 @@ If you prefer not to use `DATABASE_URL`, you can set individual variables:
 
 | Variable Name | Example Value | Description |
 |--------------|---------------|-------------|
-| `DB_HOST` | `your-db-host.amazonaws.com` | Database hostname |
-| `DB_PORT` | `5432` | Database port |
+| `DB_HOST`     | `your-db-host.amazonaws.com` | Database hostname |
+| `DB_PORT`     | `5432` | Database port |
 | `DB_USER` or `DB_USERNAME` | `postgres` | Database username |
 | `DB_PASSWORD` | `your-password` | Database password |
 | `DB_NAME` or `DB_DATABASE` | `stocktake` | Database name |
@@ -377,13 +380,17 @@ Update your frontend to use the API Gateway URL instead of localhost:
 
 ### 10.2 Common Issues
 
-**Issue: "Cannot find module"**
+**Issue: `Runtime.ImportModuleError: Cannot find module 'lambda'`**
+- **Cause:** Handler is set to `lambda.handler` but the zip has the handler at `dist/lambda.js`.
+- **Fix:** Set handler to **`dist/lambda.handler`** (not `lambda.handler`). See Step 4.
+
+**Issue: "Cannot find module" (other modules)**
 - Solution: Ensure all dependencies are in `node_modules` folder
 - Check that Prisma Client was generated
 
 **Issue: "Handler not found"**
 - Solution: Verify handler is set to `dist/lambda.handler`
-- Check that `dist/lambda.js` exists in your zip
+- Check that `dist/lambda.js` exists in your zip (when unzipped, you should see a `dist/` folder with `lambda.js` inside)
 
 **Issue: "Database connection timeout"**
 - Solution: Verify database credentials in environment variables
@@ -403,8 +410,6 @@ If your frontend is on a different domain:
 1. In API Gateway, go to **"Actions"** → **"Enable CORS"**
 2. Configure allowed origins, methods, and headers
 3. Click **"Enable CORS"** and **"Deploy API"**
-
-Or handle CORS in your Lambda code (which you already do with `cors()` middleware).
 
 Or handle CORS in your Lambda code (which you already do with `cors()` middleware).
 

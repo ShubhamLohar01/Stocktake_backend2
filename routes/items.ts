@@ -377,7 +377,7 @@ export const submitStocktakeEntries: RequestHandler = async (req, res) => {
       const itemSubcategory = (entry.subcategory || entry.itemSubcategory || "").toUpperCase();
       const floorName = (entry.floorName || entry.floor || "").toUpperCase();
       const warehouse = (entry.warehouse || "").toUpperCase();
-      const totalQuantity = parseInt(entry.units || entry.totalQuantity, 10);
+      const totalQuantity = parseFloat(entry.units || entry.totalQuantity || "0");
       const unitUom = parseFloat(entry.packageSize || entry.unitUom || 0);
       const totalWeight = parseFloat(entry.totalWeight || (totalQuantity * unitUom).toFixed(2));
       const enteredBy = (entry.enteredBy || entry.userName || "").toUpperCase();
@@ -547,7 +547,7 @@ export const getStocktakeEntries: RequestHandler = async (req, res) => {
       itemSubcategory: entry.item_subcategory,
       floorName: entry.floor_name,
       warehouse: entry.warehouse,
-      totalQuantity: entry.total_quantity,
+      totalQuantity: parseFloat(entry.total_quantity?.toString() || "0"),
       unitUom: parseFloat(entry.unit_uom.toString()),
       totalWeight: parseFloat(entry.total_weight.toString()),
       enteredBy: entry.entered_by,
@@ -620,7 +620,7 @@ export const getGroupedStocktakeEntries: RequestHandler = async (req, res) => {
         category: entry.item_category,
         subcategory: entry.item_subcategory,
         packageSize: parseFloat(entry.unit_uom.toString()),
-        units: entry.total_quantity,
+        units: parseFloat(entry.total_quantity?.toString() || "0"),
         totalWeight: parseFloat(entry.total_weight.toString()),
         userName: entry.entered_by,
         userEmail: entry.entered_by_email,
@@ -629,7 +629,7 @@ export const getGroupedStocktakeEntries: RequestHandler = async (req, res) => {
       });
 
       grouped[key].totalEntries++;
-      grouped[key].totalQuantity += entry.total_quantity;
+      grouped[key].totalQuantity += parseFloat(entry.total_quantity?.toString() || "0");
       grouped[key].totalWeight += parseFloat(entry.total_weight.toString());
     });
 
@@ -725,14 +725,14 @@ export const updateStocktakeEntry: RequestHandler<{ entryId: string }> = async (
     if (itemType !== undefined) updateData.item_type = String(itemType).toUpperCase();
     if (category !== undefined) updateData.item_category = String(category).toUpperCase();
     if (subcategory !== undefined) updateData.item_subcategory = String(subcategory).toUpperCase();
-    if (totalQuantity !== undefined) updateData.total_quantity = parseInt(totalQuantity, 10);
+    if (totalQuantity !== undefined) updateData.total_quantity = parseFloat(totalQuantity);
     if (unitUom !== undefined) updateData.unit_uom = parseFloat(unitUom);
     if (floorName !== undefined) updateData.floor_name = String(floorName).toUpperCase();
     if (warehouse !== undefined) updateData.warehouse = String(warehouse).toUpperCase();
 
     // Recalculate total weight if quantity or UOM changed
     if (totalQuantity !== undefined || unitUom !== undefined) {
-      const qty = totalQuantity !== undefined ? parseInt(totalQuantity, 10) : entry.total_quantity;
+      const qty = totalQuantity !== undefined ? parseFloat(totalQuantity) : parseFloat(entry.total_quantity.toString());
       const uom = unitUom !== undefined ? parseFloat(unitUom) : parseFloat(entry.unit_uom.toString());
       updateData.total_weight = parseFloat((qty * uom).toFixed(2));
     } else if (totalWeight !== undefined) {
@@ -982,7 +982,7 @@ export const saveStocktakeResultsheet: RequestHandler<
       const itemSubcategory = (entry.subcategory || entryAny.itemSubcategory || "").toString().trim().toUpperCase();
       const floorName = (entry.floorName || "").toString().trim().toUpperCase();
       const warehouse = (entry.warehouse || "").toString().trim().toUpperCase();
-      const totalQuantity = parseInt(entry.quantity || entryAny.totalQuantity || "0", 10);
+      const totalQuantity = parseFloat(entry.quantity || entryAny.totalQuantity || "0");
       const unitUom = parseFloat(entry.uom || entryAny.unitUom || "0");
       const totalWeight = parseFloat(entry.weight || entryAny.totalWeight || (totalQuantity * unitUom).toFixed(2));
       const enteredBy = (req.user?.email || "MANAGER").toUpperCase();
@@ -1059,6 +1059,7 @@ export const saveStocktakeResultsheet: RequestHandler<
     // Aggregate entries for resultsheet (group by item_name, category, subcategory, warehouse, floor_name)
     const aggregatedForResultsheet: Record<string, {
       item_name: string;
+      item_type: string;
       group: string;
       subgroup: string;
       warehouse: string;
@@ -1069,11 +1070,13 @@ export const saveStocktakeResultsheet: RequestHandler<
     }> = {};
 
     processedEntries.forEach((entry) => {
-      const key = `${entry.itemName}_${entry.itemCategory}_${entry.itemSubcategory}_${entry.warehouse}_${entry.floorName}`.toUpperCase();
+      // Include item_type in the aggregation key to keep items with different types separate
+      const key = `${entry.itemName}_${entry.itemType}_${entry.itemCategory}_${entry.itemSubcategory}_${entry.warehouse}_${entry.floorName}`.toUpperCase();
       
       if (!aggregatedForResultsheet[key]) {
         aggregatedForResultsheet[key] = {
           item_name: entry.itemName,
+          item_type: entry.itemType,
           group: entry.itemCategory,
           subgroup: entry.itemSubcategory,
           warehouse: entry.warehouse,
@@ -1091,11 +1094,12 @@ export const saveStocktakeResultsheet: RequestHandler<
     // Insert aggregated data into stocktake_resultsheet
     // Check if record exists first, then update or insert
     const resultsheetInsertPromises = Object.values(aggregatedForResultsheet).map(async (agg) => {
-      // First check if a record exists for this combination
+      // First check if a record exists for this combination (including item_type)
       const checkQuery = Prisma.sql`
         SELECT id, weight, quantity 
         FROM stocktake_resultsheet
         WHERE item_name = ${agg.item_name}
+          AND item_type = ${agg.item_type}
           AND "group" = ${agg.group}
           AND subgroup = ${agg.subgroup}
           AND warehouse = ${agg.warehouse}
@@ -1110,11 +1114,12 @@ export const saveStocktakeResultsheet: RequestHandler<
         // Record exists, update it
         const existingRecord = existing[0];
         const newWeight = parseFloat(existingRecord.weight?.toString() || "0") + agg.total_weight;
-        const newQuantity = parseInt(existingRecord.quantity?.toString() || "0", 10) + agg.total_quantity;
+        const newQuantity = parseFloat(existingRecord.quantity?.toString() || "0") + agg.total_quantity;
         
         const updateQuery = Prisma.sql`
           UPDATE stocktake_resultsheet
           SET 
+            item_type = ${agg.item_type},
             weight = ${newWeight},
             quantity = ${newQuantity},
             updated_at = CURRENT_TIMESTAMP
@@ -1127,8 +1132,8 @@ export const saveStocktakeResultsheet: RequestHandler<
       } else {
         // Record doesn't exist, insert it
         const insertQuery = Prisma.sql`
-          INSERT INTO stocktake_resultsheet (item_name, "group", subgroup, warehouse, floor_name, weight, quantity, uom, date, created_at, updated_at)
-          VALUES (${agg.item_name}, ${agg.group}, ${agg.subgroup}, ${agg.warehouse}, ${agg.floor_name}, ${agg.total_weight}, ${agg.total_quantity}, ${agg.uom}, ${dateStr}::date, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          INSERT INTO stocktake_resultsheet (item_name, item_type, "group", subgroup, warehouse, floor_name, weight, quantity, uom, date, created_at, updated_at)
+          VALUES (${agg.item_name}, ${agg.item_type}, ${agg.group}, ${agg.subgroup}, ${agg.warehouse}, ${agg.floor_name}, ${agg.total_weight}, ${agg.total_quantity}, ${agg.uom}, ${dateStr}::date, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           RETURNING id
         `;
         
@@ -1297,6 +1302,7 @@ export const getResultsheetData: RequestHandler<{ date: string }> = async (req, 
     const query = Prisma.sql`
       SELECT 
         item_name,
+        item_type,
         "group",
         subgroup,
         warehouse,
@@ -1332,6 +1338,7 @@ export const getResultsheetData: RequestHandler<{ date: string }> = async (req, 
     // Get unique items
     const itemsMap = new Map<string, {
       item_name: string;
+      item_type: string;
       group: string;
       subgroup: string;
     }>();
@@ -1341,10 +1348,13 @@ export const getResultsheetData: RequestHandler<{ date: string }> = async (req, 
     const floorsByWarehouse = new Map<string, Set<string>>();
 
     entries.forEach((entry: any) => {
-      const itemKey = entry.item_name?.toUpperCase() || "";
+      // Include item_type in the key to keep items with same name but different types separate
+      const itemType = entry.item_type?.toString().trim().toUpperCase() || "";
+      const itemKey = `${entry.item_name?.toUpperCase() || ""}_${itemType}`;
       if (!itemsMap.has(itemKey)) {
         itemsMap.set(itemKey, {
           item_name: entry.item_name,
+          item_type: entry.item_type?.toString().trim() || "",
           group: entry.group || "",
           subgroup: entry.subgroup || "",
         });
@@ -1365,11 +1375,13 @@ export const getResultsheetData: RequestHandler<{ date: string }> = async (req, 
     const data: Record<string, Record<string, Record<string, { weight: number; quantity: number; uom: number }>>> = {};
 
     entries.forEach((entry: any) => {
-      const itemKey = entry.item_name?.toUpperCase() || "";
+      // Use item_name + item_type as key to match the itemsMap key
+      const itemType = entry.item_type?.toString().trim().toUpperCase() || "";
+      const itemKey = `${entry.item_name?.toUpperCase() || ""}_${itemType}`;
       const warehouse = entry.warehouse?.toUpperCase() || "";
       const floorName = entry.floor_name?.toUpperCase() || "";
       const weight = parseFloat(entry.weight?.toString() || "0");
-      const quantity = parseInt(entry.quantity?.toString() || "0", 10);
+      const quantity = parseFloat(entry.quantity?.toString() || "0");
       const uom = parseFloat(entry.uom?.toString() || "0");
 
       if (!data[itemKey]) {
